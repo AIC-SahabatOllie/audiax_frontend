@@ -1,0 +1,16 @@
+services:
+  android-build:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /workspace
+    environment:
+      BUILD_MODE: ${BUILD_MODE:-debug}
+    volumes:
+      - .:/workspace
+      - flutter-pub-cache:/root/.pub-cache
+      - gradle-cache:/root/.gradle
+
+volumes:
+  flutter-pub-cache:
+  gradle-cache:

@@ -1,0 +1,11 @@
+.git
+.idea
+.dart_tool
+.pub-cache
+.pub
+build
+coverage
+ios/Flutter/.last_build_id
+*.iml
+*.log
+.DS_Store
