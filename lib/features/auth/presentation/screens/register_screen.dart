@@ -15,7 +15,7 @@ class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key, required this.authRepository, required this.onAuthenticated});
 
   final AuthRepository authRepository;
-  final VoidCallback onAuthenticated;
+  final Future<void> Function() onAuthenticated;
 
   @override
   State<RegisterScreen> createState() => _RegisterScreenState();
@@ -54,7 +54,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
     try {
       await widget.authRepository.register(email: email, name: _nameController.text.trim(), password: password);
       await widget.authRepository.login(email: email, password: password);
-      widget.onAuthenticated();
+      await widget.onAuthenticated();
+      if (!mounted) return;
+      Navigator.of(context).popUntil((route) => route.isFirst);
     } on ApiException catch (e) {
       setState(() {
         _fieldErrors = e.isValidation ? e.fields : null;

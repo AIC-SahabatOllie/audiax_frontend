@@ -14,7 +14,7 @@ class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key, required this.authRepository, required this.onAuthenticated});
 
   final AuthRepository authRepository;
-  final VoidCallback onAuthenticated;
+  final Future<void> Function() onAuthenticated;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -48,7 +48,9 @@ class _LoginScreenState extends State<LoginScreen> {
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
-      widget.onAuthenticated();
+      await widget.onAuthenticated();
+      if (!mounted) return;
+      Navigator.of(context).popUntil((route) => route.isFirst);
     } on ApiException catch (e) {
       setState(() {
         _fieldErrors = e.isValidation ? e.fields : null;

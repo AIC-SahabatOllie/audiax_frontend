@@ -15,7 +15,7 @@ class LandingScreen extends StatelessWidget {
   const LandingScreen({super.key, required this.authRepository, required this.onAuthenticated});
 
   final AuthRepository authRepository;
-  final VoidCallback onAuthenticated;
+  final Future<void> Function() onAuthenticated;
 
   void _openLogin(BuildContext context) {
     Navigator.of(context).push(
