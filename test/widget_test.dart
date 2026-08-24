@@ -1,11 +1,16 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:audiax_frontend/app/app.dart';
 
 void main() {
-  testWidgets('Boots the app shell', (WidgetTester tester) async {
-    await tester.pumpWidget(const AudiaxApp());
+  testWidgets('Shows the landing screen when no session is stored', (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues({});
 
-    expect(find.text('AUDIAX'), findsOneWidget);
+    await tester.pumpWidget(const AudiaxApp());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Daftar'), findsOneWidget);
+    expect(find.textContaining('Masuk', findRichText: true), findsOneWidget);
   });
 }
