@@ -4,17 +4,23 @@ import '../../app/theme/app_text_styles.dart';
 import '../models/machine_status.dart';
 import 'status_style.dart';
 
-/// Pill with a dot + label, tinted in the status color — the app's one and
-/// only way of surfacing NORMAL/WARNING/KRITIS (docs/design.md §1.4).
 class StatusBadge extends StatelessWidget {
-  const StatusBadge({super.key, required this.status, this.pulse = false});
+  const StatusBadge({super.key, required this.status, this.pulse = false})
+    : _unknown = false;
+
+ const StatusBadge.unknown({super.key})
+    : status = MachineStatus.normal,
+      pulse = false,
+      _unknown = true;
 
   final MachineStatus status;
   final bool pulse;
+  final bool _unknown;
 
   @override
   Widget build(BuildContext context) {
-    final style = StatusStyle.of(status);
+    final style = _unknown ? StatusStyle.unknown : StatusStyle.of(status);
+    final label = _unknown ? 'BELUM DICEK' : status.label;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
       decoration: BoxDecoration(
@@ -27,7 +33,7 @@ class StatusBadge extends StatelessWidget {
           _StatusDot(color: style.color, pulse: pulse),
           const SizedBox(width: 6),
           Text(
-            status.label,
+            label,
             style: AppTextStyles.mono(
               size: 9,
               weight: FontWeight.w600,

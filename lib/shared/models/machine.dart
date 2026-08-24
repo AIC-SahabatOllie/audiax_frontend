@@ -48,6 +48,19 @@ class Machine {
 
   MachineStatus get status => latestInspection?.status.asMachineStatus ?? MachineStatus.normal;
 
+  /// Whether this machine has ever produced a health reading. Distinct from
+  /// [status]: an un-inspected machine defaults to `normal` on the shared
+  /// scale, but the dashboard must show it as *unknown*, never as healthy.
+  bool get inspected => latestInspection?.status.asMachineStatus != null;
+
+  DateTime? get lastInspectedAt => latestInspection?.inspectedAt;
+
+  /// Drives the fleet ring's "sudah dicek hari ini" fraction.
+  bool get checkedToday {
+    final at = lastInspectedAt;
+    return at != null && DateFormatter.isToday(at);
+  }
+
   double get zScore => latestInspection?.zScore ?? 0;
 
   String? get dominantIndicator => latestInspection?.dominantIndicator;
@@ -65,6 +78,14 @@ class Machine {
     final inspection = latestInspection;
     if (inspection == null) return 'belum diperiksa';
     return 'cek ${DateFormatter.time(inspection.inspectedAt)}';
+  }
+
+  /// Relative variant of [lastCheckedLabel] for the dashboard, where "2 jam
+  /// lalu" answers "is this reading still fresh?" better than a clock time.
+  String get lastCheckedRelativeLabel {
+    final at = lastInspectedAt;
+    if (at == null) return 'Belum pernah diperiksa';
+    return 'Diperiksa ${DateFormatter.relative(at)}';
   }
 
   String get meta => '$line · $lastCheckedLabel';

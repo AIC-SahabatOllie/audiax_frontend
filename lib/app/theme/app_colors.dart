@@ -43,6 +43,14 @@ class AppColors {
   static const Color criticalTint = Color(0xFFFEF2F2);
   static const Color criticalChip = Color(0x29EF4444);
 
+  /// "Not inspected yet" — deliberately outside the normal/warning/critical
+  /// scale: a machine with no inspection is unknown, not healthy, so it must
+  /// never borrow [ok] green on the dashboard.
+  static const Color neutral = Color(0xFF94A3B8);
+  static const Color neutralDeep = Color(0xFF475569);
+  static const Color neutralTint = Color(0xFFF8FAFC);
+  static const Color neutralChip = Color(0x1F64748B);
+
   static const Color dark = Color(0xFF0F172A);
   static const Color darkOverlay = Color(0x1AFFFFFF);
 
@@ -52,5 +60,13 @@ class AppColors {
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
     colors: [Color(0xFF0F172A), Color(0xFF0D9488)],
+  );
+
+  /// Filled primary tiles/CTAs — Bright Teal → Ocean Teal, per design.md §4
+  /// (`QuickActionTile` primary, `PrimaryCTAButton`).
+  static const LinearGradient actionGradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xFF14B8A6), Color(0xFF0D9488)],
   );
 }

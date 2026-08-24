@@ -4,16 +4,15 @@ import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_text_styles.dart';
 import '../../../../core/errors/api_exception.dart';
 import '../../../../shared/models/machine.dart';
+import '../../../../shared/models/machine_status.dart';
 import '../../../../shared/services/machine_repository.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/status_badge.dart';
 import '../../../../shared/widgets/status_style.dart';
+import '../../../../shared/widgets/threshold_meter.dart';
 
 enum _CardMode { none, menu, renaming, confirmingDelete }
 
-/// One machine row on the dashboard: status, z-score, and the
-/// Periksa/Detail/⋯ action row with an inline action sheet for
-/// rename/recalibrate/delete (docs/design.md "InlineActionSheet").
 class MachineCard extends StatefulWidget {
   const MachineCard({
     super.key,
@@ -103,152 +102,68 @@ class _MachineCardState extends State<MachineCard> {
   @override
   Widget build(BuildContext context) {
     final machine = widget.machine;
-    final style = StatusStyle.of(machine.status);
-    final calibColor = machine.calibrated
-        ? AppColors.okDeep
-        : AppColors.warningDeep;
+    final style = StatusStyle.forMachine(
+      machine.status,
+      inspected: machine.inspected,
+    );
+    final expanded = _mode != _CardMode.none;
 
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: expanded ? style.color.withValues(alpha: 0.35) : AppColors.divider,
+        ),
         boxShadow: [
           BoxShadow(
-            color: AppColors.ink.withValues(alpha: 0.08),
-            blurRadius: 18,
+            color: AppColors.ink.withValues(alpha: expanded ? 0.1 : 0.05),
+            blurRadius: expanded ? 22 : 14,
             offset: const Offset(0, 6),
           ),
         ],
       ),
       clipBehavior: Clip.antiAlias,
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Container(width: 4, color: style.color),
-            Expanded(
+      // Stack rather than a stretched Row: the status spine has to span the
+      // card's full height, and the card's own height comes from content that
+      // measures itself with LayoutBuilder (the threshold meter), which
+      // cannot report intrinsic dimensions to an IntrinsicHeight row.
+      child: Stack(
+        children: [
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: 5,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [style.color, style.deep],
+                ),
+              ),
+            ),
+          ),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: widget.onOpenDetail,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(15, 18, 18, 18),
+                padding: const EdgeInsets.fromLTRB(20, 16, 16, 15),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          width: 44,
-                          height: 44,
-                          decoration: BoxDecoration(
-                            color: style.tint,
-                            borderRadius: BorderRadius.circular(15),
-                          ),
-                          child: Center(
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                _bar(style.color, 8, 0.55),
-                                const SizedBox(width: 2),
-                                _bar(style.color, 15, 1),
-                                const SizedBox(width: 2),
-                                _bar(style.color, 11, 0.75),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 13),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                machine.name,
-                                style: AppTextStyles.heading.copyWith(
-                                  fontSize: 16.5,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(machine.meta, style: AppTextStyles.caption),
-                              const SizedBox(height: 6),
-                              StatusBadge(status: machine.status),
-                            ],
-                          ),
-                        ),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(
-                              machine.zScore
-                                  .toStringAsFixed(1)
-                                  .replaceAll('.', ','),
-                              style: AppTextStyles.mono(
-                                size: 26,
-                                color: AppColors.ink,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              'SKOR-Z',
-                              style: AppTextStyles.mono(
-                                size: 8,
-                                color: AppColors.textFaint,
-                                letterSpacing: 1.4,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Container(
-                          width: 4,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: calibColor,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 7),
-                        Text(
-                          machine.calibrationLabel,
-                          style: AppTextStyles.mono(
-                            size: 10,
-                            color: calibColor,
-                            letterSpacing: 0,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: AppButton(
-                            label: 'Periksa',
-                            onPressed: widget.onCheck,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: AppButton(
-                            label: 'Detail',
-                            variant: AppButtonVariant.secondary,
-                            onPressed: widget.onOpenDetail,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        _MenuTrigger(
-                          open: _mode == _CardMode.menu,
-                          onTap: () => _setMode(
-                            _mode == _CardMode.menu
-                                ? _CardMode.none
-                                : _CardMode.menu,
-                          ),
-                        ),
-                      ],
-                    ),
+                    _buildIdentityRow(machine, style),
+                    const SizedBox(height: 13),
+                    _buildStatusRow(machine),
+                    if (machine.inspected) ...[
+                      const SizedBox(height: 13),
+                      _ZScoreScale(value: machine.zScore, color: style.color),
+                    ],
+                    const SizedBox(height: 14),
+                    _buildActionRow(machine),
                     if (_mode == _CardMode.menu) _buildMenu(),
                     if (_mode == _CardMode.renaming) _buildRenameForm(),
                     if (_mode == _CardMode.confirmingDelete)
@@ -257,20 +172,164 @@ class _MachineCardState extends State<MachineCard> {
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _bar(Color color, double height, double opacity) {
-    return Container(
-      width: 3,
-      height: height,
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: opacity),
-        borderRadius: BorderRadius.circular(1),
-      ),
+  Widget _buildIdentityRow(Machine machine, StatusStyle style) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _WaveTile(style: style),
+        const SizedBox(width: 13),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                machine.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.heading.copyWith(fontSize: 16.5),
+              ),
+              const SizedBox(height: 5),
+              Row(
+                children: [
+                  const Icon(
+                    Icons.place_outlined,
+                    size: 12,
+                    color: AppColors.textFaint,
+                  ),
+                  const SizedBox(width: 3),
+                  Flexible(
+                    child: Text(
+                      machine.line,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.caption.copyWith(fontSize: 11.5),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 3),
+              Text(
+                machine.lastCheckedRelativeLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.caption.copyWith(
+                  fontSize: 11,
+                  color: AppColors.textFaint,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 10),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(
+              machine.inspected
+                  ? machine.zScore.toStringAsFixed(1).replaceAll('.', ',')
+                  : '—',
+              style: AppTextStyles.mono(
+                size: 26,
+                color: machine.inspected ? AppColors.ink : AppColors.textFaint,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'SKOR-Z',
+              style: AppTextStyles.mono(
+                size: 8,
+                color: AppColors.textFaint,
+                letterSpacing: 1.4,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatusRow(Machine machine) {
+    final calibColor = machine.calibrated
+        ? AppColors.okDeep
+        : AppColors.warningDeep;
+    return Row(
+      children: [
+        if (machine.inspected)
+          StatusBadge(
+            status: machine.status,
+            pulse: machine.status == MachineStatus.critical,
+          )
+        else
+          const StatusBadge.unknown(),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Container(
+                width: 4,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: calibColor,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  machine.calibrationLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                  style: AppTextStyles.mono(
+                    size: 9.5,
+                    color: calibColor,
+                    letterSpacing: 0,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActionRow(Machine machine) {
+
+    final needsCalibration = !machine.calibrated;
+    return Row(
+      children: [
+        Expanded(
+          child: AppButton(
+            label: needsCalibration ? 'Kalibrasi' : 'Periksa',
+            onPressed: needsCalibration
+                ? () => widget.onRecalibrate(machine)
+                : widget.onCheck,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: AppButton(
+            label: 'Detail',
+            variant: AppButtonVariant.secondary,
+            onPressed: widget.onOpenDetail,
+          ),
+        ),
+        const SizedBox(width: 8),
+        _MenuTrigger(
+          open: _mode == _CardMode.menu,
+          onTap: () => _setMode(
+            _mode == _CardMode.menu ? _CardMode.none : _CardMode.menu,
+          ),
+        ),
+      ],
     );
   }
 
@@ -284,15 +343,17 @@ class _MachineCardState extends State<MachineCard> {
           child: Column(
             children: [
               _menuRow(
+                Icons.drive_file_rename_outline_rounded,
                 'Ganti nama mesin',
                 AppColors.ink,
                 () => _setMode(_CardMode.renaming),
               ),
-              _menuRow('Kalibrasi ulang', AppColors.ink, () {
+              _menuRow(Icons.tune_rounded, 'Kalibrasi ulang', AppColors.ink, () {
                 _setMode(_CardMode.none);
                 widget.onRecalibrate(widget.machine);
               }),
               _menuRow(
+                Icons.delete_outline_rounded,
                 'Hapus mesin',
                 AppColors.critical,
                 () => _setMode(_CardMode.confirmingDelete),
@@ -304,21 +365,29 @@ class _MachineCardState extends State<MachineCard> {
     );
   }
 
-  Widget _menuRow(String label, Color color, VoidCallback onTap) {
+  Widget _menuRow(
+    IconData icon,
+    String label,
+    Color color,
+    VoidCallback onTap,
+  ) {
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: color,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        child: Row(
+          children: [
+            Icon(icon, size: 17, color: color),
+            const SizedBox(width: 11),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );
@@ -370,8 +439,8 @@ class _MachineCardState extends State<MachineCard> {
               children: [
                 Expanded(
                   child: AppButton(
-                    label: _busy ? 'Menyimpan…' : 'Simpan',
-                    enabled: !_busy,
+                    label: 'Simpan',
+                    loading: _busy,
                     onPressed: _submitRename,
                   ),
                 ),
@@ -402,6 +471,9 @@ class _MachineCardState extends State<MachineCard> {
         decoration: BoxDecoration(
           color: AppColors.criticalTint,
           borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: AppColors.critical.withValues(alpha: 0.25),
+          ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -429,9 +501,9 @@ class _MachineCardState extends State<MachineCard> {
               children: [
                 Expanded(
                   child: AppButton(
-                    label: _busy ? 'Menghapus…' : 'Hapus',
+                    label: 'Hapus',
                     variant: AppButtonVariant.danger,
-                    enabled: !_busy,
+                    loading: _busy,
                     onPressed: _submitDelete,
                   ),
                 ),
@@ -452,6 +524,94 @@ class _MachineCardState extends State<MachineCard> {
   }
 }
 
+class _WaveTile extends StatelessWidget {
+  const _WaveTile({required this.style});
+
+  final StatusStyle style;
+
+  static const _heights = [9.0, 16.0, 12.0, 19.0, 10.0];
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 46,
+      height: 46,
+      decoration: BoxDecoration(
+        color: style.tint,
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: style.color.withValues(alpha: 0.18)),
+      ),
+      child: Center(
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            for (var i = 0; i < _heights.length; i++) ...[
+              if (i > 0) const SizedBox(width: 2.5),
+              Container(
+                width: 3,
+                height: _heights[i],
+                decoration: BoxDecoration(
+                  color: style.color.withValues(alpha: i.isEven ? 0.55 : 1),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ZScoreScale extends StatelessWidget {
+  const _ZScoreScale({required this.value, required this.color});
+
+  final double value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final labelStyle = AppTextStyles.mono(
+      size: 8,
+      color: AppColors.textFaint,
+      letterSpacing: 0.6,
+    );
+    return Column(
+      children: [
+        ThresholdMeter(value: value, color: color, trackColor: AppColors.surfaceMuted),
+        const SizedBox(height: 5),
+        SizedBox(
+          height: 11,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final width = constraints.maxWidth;
+              return Stack(
+                children: [
+                  Positioned(left: 0, child: Text('0', style: labelStyle)),
+                  Positioned(
+                    left: width * MachineStatusLabel.warningThreshold /
+                            MachineStatusLabel.scaleMax -
+                        8,
+                    child: Text('3,0', style: labelStyle),
+                  ),
+                  Positioned(
+                    left: width * MachineStatusLabel.criticalThreshold /
+                            MachineStatusLabel.scaleMax -
+                        8,
+                    child: Text('6,0', style: labelStyle),
+                  ),
+                  Positioned(right: 0, child: Text('8', style: labelStyle)),
+                ],
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _MenuTrigger extends StatelessWidget {
   const _MenuTrigger({required this.open, required this.onTap});
 
@@ -461,17 +621,21 @@ class _MenuTrigger extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: open ? AppColors.divider : AppColors.surfaceMuted,
-      borderRadius: BorderRadius.circular(14),
+      color: open ? AppColors.ink : AppColors.surfaceMuted,
+      borderRadius: BorderRadius.circular(16),
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         onTap: onTap,
-        child: const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 13, vertical: 13),
-          child: Icon(
-            Icons.more_horiz_rounded,
-            size: 20,
-            color: AppColors.inkSoft,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 13),
+          child: AnimatedRotation(
+            turns: open ? 0.25 : 0,
+            duration: const Duration(milliseconds: 180),
+            child: Icon(
+              Icons.more_horiz_rounded,
+              size: 20,
+              color: open ? Colors.white : AppColors.inkSoft,
+            ),
           ),
         ),
       ),

@@ -2,22 +2,26 @@ import 'package:flutter/material.dart';
 
 import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_text_styles.dart';
+import '../../../../core/utils/date_formatter.dart';
 import '../../../../shared/models/machine.dart';
 import '../../../../shared/models/machine_status.dart';
 import '../../../../shared/models/recording_mode.dart';
 import '../../../../shared/models/user.dart';
 import '../../../../shared/services/machine_repository.dart';
 import '../../../../shared/widgets/app_button.dart';
+import '../../../../shared/widgets/brand_mark.dart';
 import '../../../auth/data/auth_repository.dart';
 import '../../../calibration/presentation/screens/calibration_form_screen.dart';
 import '../../../daily_check/presentation/screens/ready_screen.dart';
+import '../widgets/fleet_summary_card.dart';
 import '../widgets/machine_card.dart';
+import '../widgets/machine_card_skeleton.dart';
+import '../widgets/machine_picker_sheet.dart';
 import 'machine_detail_screen.dart';
 
-enum _MachineFilter { semua, perluTindakan, normal }
-
-/// "Mesin" dashboard — the app's home screen: fleet summary, filters, and
-/// the list of registered machines, backed by `GET /api/machines`
+/// "Mesin" dashboard — the app's home screen (docs/design.md §3.1). The MVP
+/// build keeps it to four blocks: greeting, fleet rollup, one primary action
+/// ("Periksa"), and the machine list — backed by `GET /api/machines`
 /// (`docs/api_contract.md` §4) via [MachineRepository] (PRD §6A.1 #1).
 class MachinesScreen extends StatefulWidget {
   const MachinesScreen({
@@ -38,17 +42,28 @@ class MachinesScreen extends StatefulWidget {
 }
 
 class _MachinesScreenState extends State<MachinesScreen> {
-  _MachineFilter _filter = _MachineFilter.semua;
-
-  List<Machine> _applyFilter(List<Machine> machines) {
-    return switch (_filter) {
-      _MachineFilter.semua => machines,
-      _MachineFilter.perluTindakan =>
-        machines.where((m) => m.status != MachineStatus.normal).toList(),
-      _MachineFilter.normal =>
-        machines.where((m) => m.status == MachineStatus.normal).toList(),
+  /// Priority order for the list: the worst reading first, with
+  /// never-inspected machines ranked *above* healthy ones — an unknown
+  /// machine is a pending task, a normal one is not. Replaces the filter/sort
+  /// controls: with one sensible order there is nothing left to choose.
+  static int _priorityRank(Machine machine) {
+    if (!machine.inspected) return 2;
+    return switch (machine.status) {
+      MachineStatus.critical => 0,
+      MachineStatus.warning => 1,
+      MachineStatus.normal => 3,
     };
   }
+
+  List<Machine> _sorted(List<Machine> machines) {
+    return [...machines]..sort((a, b) {
+      final rank = _priorityRank(a).compareTo(_priorityRank(b));
+      if (rank != 0) return rank;
+      return b.zScore.compareTo(a.zScore);
+    });
+  }
+
+  // ---------------------------------------------------------------- navigation
 
   void _openCalibration({Machine? existingMachine}) {
     Navigator.of(context).push(
@@ -73,6 +88,12 @@ class _MachinesScreenState extends State<MachinesScreen> {
   }
 
   void _startInspection(Machine machine) {
+    // Without a baseline there is nothing to compare a recording against, so
+    // route to calibration instead of a check the backend would reject.
+    if (!machine.calibrated) {
+      _openCalibration(existingMachine: machine);
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ReadyScreen(
@@ -82,6 +103,21 @@ class _MachinesScreenState extends State<MachinesScreen> {
         ),
       ),
     );
+  }
+
+  /// The screen's single primary action: one machine goes straight into the
+  /// check, several open the picker (already ordered worst-first).
+  Future<void> _quickInspect(List<Machine> machines) async {
+    if (machines.isEmpty) {
+      _openCalibration();
+      return;
+    }
+    if (machines.length == 1) {
+      _startInspection(machines.first);
+      return;
+    }
+    final picked = await showMachinePickerSheet(context, machines: machines);
+    if (picked != null && mounted) _startInspection(picked);
   }
 
   Future<void> _logout() async {
@@ -95,19 +131,53 @@ class _MachinesScreenState extends State<MachinesScreen> {
       context: context,
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
       ),
       builder: (_) => SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(widget.user.name, style: AppTextStyles.heading),
-              const SizedBox(height: 4),
-              Text(widget.user.email, style: AppTextStyles.caption),
-              const SizedBox(height: 20),
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.divider,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 22),
+              Row(
+                children: [
+                  _Avatar(initials: widget.user.initials),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.user.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.heading,
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          widget.user.email,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.caption,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 22),
               AppButton(
                 label: 'Keluar',
                 variant: AppButtonVariant.danger,
@@ -120,123 +190,95 @@ class _MachinesScreenState extends State<MachinesScreen> {
     );
   }
 
+  // -------------------------------------------------------------------- build
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.screenBackground,
       body: ListenableBuilder(
         listenable: widget.repository,
         builder: (context, _) {
           final machines = widget.repository.machines;
 
           if (widget.repository.isLoading && machines.isEmpty) {
-            return const Center(
-              child: CircularProgressIndicator(color: AppColors.brand),
-            );
+            return const _LoadingState();
           }
           if (widget.repository.error != null && machines.isEmpty) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      widget.repository.error!,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 13.5,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    AppButton(
-                      label: 'Coba lagi',
-                      onPressed: widget.repository.load,
-                    ),
-                  ],
-                ),
-              ),
+            return _ErrorState(
+              message: widget.repository.error!,
+              onRetry: widget.repository.load,
             );
           }
 
-          final warnCount = machines
-              .where((m) => m.status != MachineStatus.normal)
-              .length;
-          final okCount = machines.length - warnCount;
-          final filtered = _applyFilter(machines);
-          final fleetIsEmpty = machines.isEmpty;
+          final snapshot = FleetSnapshot.of(machines);
+          final ordered = _sorted(machines);
 
           return SafeArea(
+            bottom: false,
             child: RefreshIndicator(
+              color: AppColors.brand,
               onRefresh: widget.repository.load,
-              child: CustomScrollView(
-                slivers: [
-                  SliverToBoxAdapter(
-                    child: _Header(
-                      user: widget.user,
-                      total: machines.length,
-                      warn: warnCount,
-                      ok: okCount,
-                      onAvatarTap: _openAccountSheet,
-                    ),
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  _Header(
+                    user: widget.user,
+                    alert: snapshot.critical > 0,
+                    onAvatarTap: _openAccountSheet,
                   ),
-                  if (fleetIsEmpty)
-                    SliverToBoxAdapter(
-                      child: _EmptyFleetState(onTap: () => _openCalibration()),
-                    )
+                  // The rollup is meaningless before the first machine
+                  // exists — the empty state does the talking instead.
+                  if (machines.isEmpty)
+                    _EmptyFleetState(onTap: () => _openCalibration())
                   else ...[
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(22, 20, 22, 12),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text(
-                              'Semua mesin',
-                              style: AppTextStyles.title,
-                            ),
-                            _AddMachineChip(onTap: () => _openCalibration()),
-                          ],
-                        ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
+                      child: FleetSummaryCard(snapshot: snapshot),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 14, 18, 0),
+                      child: Column(
+                        children: [
+                          _AddMachineButton(
+                            onTap: () => _openCalibration(),
+                          ),
+                          const SizedBox(height: 10),
+                          AppButton(
+                            label: 'Periksa mesin · 10 detik',
+                            onPressed: () => _quickInspect(ordered),
+                          ),
+                        ],
                       ),
                     ),
-                    SliverToBoxAdapter(
-                      child: _FilterRow(
-                        filter: _filter,
-                        onChanged: (f) => setState(() => _filter = f),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 26, 18, 14),
+                      child: Row(
+                        children: [
+                          const Text(
+                            'Mesin terhubung',
+                            style: AppTextStyles.title,
+                          ),
+                          const SizedBox(width: 9),
+                          _CountBubble(count: machines.length),
+                        ],
                       ),
                     ),
-                    if (filtered.isEmpty)
-                      const SliverToBoxAdapter(child: _EmptyFilterState())
-                    else
-                      SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(22, 4, 22, 0),
-                        sliver: SliverList.separated(
-                          itemCount: filtered.length,
-                          separatorBuilder: (_, _) =>
-                              const SizedBox(height: 12),
-                          itemBuilder: (context, index) {
-                            final machine = filtered[index];
-                            return MachineCard(
-                              machine: machine,
-                              repository: widget.repository,
-                              onOpenDetail: () => _openDetail(machine.id),
-                              onCheck: () => _startInspection(machine),
-                              onRecalibrate: (m) =>
-                                  _openCalibration(existingMachine: m),
-                            );
-                          },
+                    for (final machine in ordered)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+                        child: MachineCard(
+                          key: ValueKey(machine.id),
+                          machine: machine,
+                          repository: widget.repository,
+                          onOpenDetail: () => _openDetail(machine.id),
+                          onCheck: () => _startInspection(machine),
+                          onRecalibrate: (m) =>
+                              _openCalibration(existingMachine: m),
                         ),
                       ),
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(22, 14, 22, 28),
-                        child: _AddMachineDashedCard(
-                          onTap: () => _openCalibration(),
-                        ),
-                      ),
-                    ),
                   ],
+                  const _DisclaimerFooter(),
                 ],
               ),
             ),
@@ -247,22 +289,20 @@ class _MachinesScreenState extends State<MachinesScreen> {
   }
 }
 
+/// Greeting block. Flat on the page background rather than a gradient hero:
+/// the summary card below it is what the eye should land on first.
 class _Header extends StatelessWidget {
   const _Header({
     required this.user,
-    required this.total,
-    required this.warn,
-    required this.ok,
+    required this.alert,
     required this.onAvatarTap,
   });
 
   final User user;
-  final int total;
-  final int warn;
-  final int ok;
+  final bool alert;
   final VoidCallback onAvatarTap;
 
-  String get _greeting {
+  static String get _greeting {
     final hour = DateTime.now().hour;
     if (hour < 11) return 'Selamat pagi';
     if (hour < 15) return 'Selamat siang';
@@ -272,244 +312,186 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: AppColors.heroGradient,
-        borderRadius: BorderRadius.vertical(bottom: Radius.circular(30)),
-      ),
-      child: ClipRRect(
-        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(30)),
-        child: Stack(
-          children: [
-            Positioned(
-              right: -10,
-              top: 10,
-              bottom: 10,
-              child: IgnorePointer(child: _WaveformMark()),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(22, 10, 22, 22),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '$_greeting, ${user.name}',
-                              style: TextStyle(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white.withValues(alpha: 0.72),
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            const Text(
-                              'Pemantauan kondisi mesin',
-                              style: TextStyle(
-                                fontSize: 23,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -0.7,
-                                height: 1.15,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      _Avatar(initials: user.initials, onTap: onAvatarTap),
-                    ],
-                  ),
-                  const SizedBox(height: 22),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _StatChip(
-                          icon: Icons.precision_manufacturing_rounded,
-                          value: '$total',
-                          label: 'TERDAFTAR',
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _StatChip(
-                          icon: Icons.warning_amber_rounded,
-                          value: '$warn',
-                          label: 'PERHATIAN',
-                          accent: AppColors.warning,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _StatChip(
-                          icon: Icons.verified_rounded,
-                          value: '$ok',
-                          label: 'NORMAL',
-                          accent: AppColors.brandAccent,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 10, 18, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const BrandMark(size: 24),
+              const SizedBox(width: 8),
+              Text(
+                'AUDIAX',
+                style: AppTextStyles.mono(
+                  size: 11,
+                  weight: FontWeight.w700,
+                  color: AppColors.ink,
+                  letterSpacing: 2,
+                ),
               ),
+              const Spacer(),
+              _Avatar(
+                initials: user.initials,
+                onTap: onAvatarTap,
+                alert: alert,
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Text(
+            '$_greeting, ${user.name}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppTextStyles.caption.copyWith(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
             ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 5),
+          const Text(
+            'Pemantauan kondisi mesin',
+            style: AppTextStyles.title,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            DateFormatter.longDate(DateTime.now()).toUpperCase(),
+            style: AppTextStyles.mono(
+              size: 9.5,
+              color: AppColors.textFaint,
+              letterSpacing: 1.3,
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
 class _Avatar extends StatelessWidget {
-  const _Avatar({required this.initials, required this.onTap});
+  const _Avatar({required this.initials, this.onTap, this.alert = false});
 
   final String initials;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
+
+  /// Red dot when the fleet has a critical machine — the account sheet is
+  /// also where the user lands after acting on an alert.
+  final bool alert;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white.withValues(alpha: 0.14),
-      shape: const CircleBorder(
-        side: BorderSide(color: Colors.white24, width: 1.2),
-      ),
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: onTap,
-        child: Container(
-          width: 44,
-          height: 44,
-          alignment: Alignment.center,
-          child: Text(
-            initials,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-              color: Colors.white,
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Material(
+          color: Colors.transparent,
+          shape: const CircleBorder(),
+          clipBehavior: Clip.antiAlias,
+          child: Ink(
+            decoration: const BoxDecoration(
+              gradient: AppColors.actionGradient,
+              shape: BoxShape.circle,
+            ),
+            child: InkWell(
+              onTap: onTap,
+              child: SizedBox(
+                width: 44,
+                height: 44,
+                child: Center(
+                  child: Text(
+                    initials,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
             ),
           ),
+        ),
+        if (alert)
+          Positioned(
+            right: -1,
+            top: -1,
+            child: Container(
+              width: 13,
+              height: 13,
+              decoration: BoxDecoration(
+                color: AppColors.critical,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: AppColors.screenBackground,
+                  width: 2,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _CountBubble extends StatelessWidget {
+  const _CountBubble({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppColors.brandTint,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppColors.brand.withValues(alpha: 0.18)),
+      ),
+      child: Text(
+        '$count',
+        style: AppTextStyles.mono(
+          size: 11,
+          weight: FontWeight.w700,
+          color: AppColors.brand,
+          letterSpacing: 0,
         ),
       ),
     );
   }
 }
 
-/// Faint decorative equalizer bars in the header corner — a quiet nod to the
-/// app's "listen to the machine" identity without competing with the stats.
-class _WaveformMark extends StatelessWidget {
-  const _WaveformMark();
-
-  static const _heights = [0.3, 0.55, 0.85, 0.5, 1.0, 0.4, 0.7, 0.35];
-
-  @override
-  Widget build(BuildContext context) {
-    return Opacity(
-      opacity: 0.1,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (final h in _heights)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 3),
-              child: FractionallySizedBox(
-                heightFactor: h,
-                child: Container(
-                  width: 5,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatChip extends StatelessWidget {
-  const _StatChip({
-    required this.icon,
-    required this.value,
-    required this.label,
-    this.accent = Colors.white,
-  });
-
-  final IconData icon;
-  final String value;
-  final String label;
-  final Color accent;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(13),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 16, color: accent),
-          const SizedBox(height: 10),
-          Text(
-            value,
-            style: AppTextStyles.mono(
-              size: 24,
-              color: Colors.white,
-              letterSpacing: -0.8,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: AppTextStyles.mono(
-              size: 8,
-              color: Colors.white.withValues(alpha: 0.65),
-              letterSpacing: 1.1,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AddMachineChip extends StatelessWidget {
-  const _AddMachineChip({required this.onTap});
+/// Secondary CTA above the primary "Periksa" button: white-on-page rather
+/// than filled, so it reads as the calmer of the two actions.
+class _AddMachineButton extends StatelessWidget {
+  const _AddMachineButton({required this.onTap});
 
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: AppColors.ink,
-      borderRadius: BorderRadius.circular(999),
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(18),
       child: InkWell(
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(18),
         onTap: onTap,
-        child: const Padding(
-          padding: EdgeInsets.fromLTRB(12, 9, 15, 9),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: AppColors.brand.withValues(alpha: 0.3)),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.add_rounded, size: 16, color: Colors.white),
-              SizedBox(width: 4),
+              Icon(Icons.add_rounded, size: 19, color: AppColors.brand),
+              SizedBox(width: 8),
               Text(
-                'Tambah',
+                'Tambah mesin',
                 style: TextStyle(
-                  fontSize: 12.5,
+                  fontSize: 14.5,
                   fontWeight: FontWeight.w700,
-                  color: Colors.white,
+                  color: AppColors.brand,
                 ),
               ),
             ],
@@ -520,33 +502,95 @@ class _AddMachineChip extends StatelessWidget {
   }
 }
 
-class _FilterRow extends StatelessWidget {
-  const _FilterRow({required this.filter, required this.onChanged});
-
-  final _MachineFilter filter;
-  final ValueChanged<_MachineFilter> onChanged;
-
-  static const _labels = {
-    _MachineFilter.semua: 'Semua',
-    _MachineFilter.perluTindakan: 'Perlu tindakan',
-    _MachineFilter.normal: 'Normal',
-  };
+class _LoadingState extends StatelessWidget {
+  const _LoadingState();
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(22, 0, 22, 10),
-      child: Row(
+    return SafeArea(
+      bottom: false,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(18, 0, 18, 24),
+        physics: const NeverScrollableScrollPhysics(),
         children: [
-          for (final entry in _labels.entries) ...[
-            _FilterChip(
-              label: entry.value,
-              selected: filter == entry.key,
-              onTap: () => onChanged(entry.key),
-            ),
-            const SizedBox(width: 8),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.brand,
+                ),
+              ),
+              const SizedBox(width: 11),
+              Text('MEMUAT ARMADA', style: AppTextStyles.eyebrow),
+            ],
+          ),
+          const SizedBox(height: 22),
+          for (var i = 0; i < 3; i++) ...[
+            const MachineCardSkeleton(),
+            const SizedBox(height: 12),
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _ErrorState extends StatelessWidget {
+  const _ErrorState({required this.message, required this.onRetry});
+
+  final String message;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  color: AppColors.criticalTint,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Icon(
+                  Icons.cloud_off_rounded,
+                  size: 27,
+                  color: AppColors.critical,
+                ),
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                'Gagal memuat armada',
+                style: AppTextStyles.heading,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 13,
+                  height: 1.5,
+                  color: AppColors.textMuted,
+                ),
+              ),
+              const SizedBox(height: 22),
+              SizedBox(
+                width: 200,
+                child: AppButton(label: 'Coba lagi', onPressed: onRetry),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -562,19 +606,20 @@ class _EmptyFleetState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(22, 36, 22, 28),
+      padding: const EdgeInsets.fromLTRB(22, 26, 22, 10),
       child: Column(
         children: [
           Container(
-            width: 64,
-            height: 64,
+            width: 68,
+            height: 68,
             decoration: BoxDecoration(
               color: AppColors.brandTint,
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: AppColors.brand.withValues(alpha: 0.16)),
             ),
             child: const Icon(
               Icons.precision_manufacturing_rounded,
-              size: 30,
+              size: 31,
               color: AppColors.brand,
             ),
           ),
@@ -586,7 +631,7 @@ class _EmptyFleetState extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Kalibrasi mesin pertama untuk mulai memantau kondisinya\nsetiap hari.',
+            'Kalibrasi mesin pertama untuk mulai memantau kondisinya setiap hari.',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 13,
@@ -599,195 +644,113 @@ class _EmptyFleetState extends StatelessWidget {
             width: double.infinity,
             child: AppButton(label: '+ Kalibrasi mesin baru', onPressed: onTap),
           ),
+          const SizedBox(height: 18),
+          const _CalibrationSteps(),
         ],
       ),
     );
   }
 }
 
-/// Shown when a status filter has no matching machines — distinguishes
-/// "nothing registered" from "nothing matches this filter" so the user
-/// isn't misled into re-calibrating.
-class _EmptyFilterState extends StatelessWidget {
-  const _EmptyFilterState();
+/// What the first calibration actually involves — set expectations before the
+/// user commits to a 120-second recording.
+class _CalibrationSteps extends StatelessWidget {
+  const _CalibrationSteps();
+
+  static const _steps = [
+    'Beri nama mesin dan lininya',
+    'Rekam 120 detik kondisi sehat sebagai baseline',
+    'Cek harian cukup 10 detik per mesin',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.divider),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('CARA KERJANYA', style: AppTextStyles.eyebrow),
+          const SizedBox(height: 13),
+          for (var i = 0; i < _steps.length; i++) ...[
+            if (i > 0) const SizedBox(height: 11),
+            Row(
+              children: [
+                Container(
+                  width: 26,
+                  height: 26,
+                  decoration: BoxDecoration(
+                    color: AppColors.brandTint,
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  child: Center(
+                    child: Text(
+                      '${i + 1}',
+                      style: AppTextStyles.mono(
+                        size: 11,
+                        weight: FontWeight.w700,
+                        color: AppColors.brand,
+                        letterSpacing: 0,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 11),
+                Expanded(
+                  child: Text(
+                    _steps[i],
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.inkSoft,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// The PRD's standing disclaimer: AUDIAX triages, it does not diagnose.
+class _DisclaimerFooter extends StatelessWidget {
+  const _DisclaimerFooter();
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(22, 18, 22, 6),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 20),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: AppColors.divider),
-        ),
-        child: const Column(
-          children: [
-            Icon(
-              Icons.search_off_rounded,
-              size: 26,
-              color: AppColors.textFaint,
-            ),
-            SizedBox(height: 10),
-            Text(
-              'Tidak ada mesin dengan status ini',
+      padding: const EdgeInsets.fromLTRB(28, 22, 28, 30),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.shield_outlined,
+            size: 13,
+            color: AppColors.textFaint,
+          ),
+          const SizedBox(width: 7),
+          Flexible(
+            child: Text(
+              'AUDIAX memberi petunjuk awal dari suara mesin — bukan diagnosis akhir. Selalu konfirmasi dengan pemeriksaan teknisi.',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textMuted,
+              style: AppTextStyles.caption.copyWith(
+                fontSize: 11,
+                color: AppColors.textFaint,
+                height: 1.5,
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _FilterChip extends StatelessWidget {
-  const _FilterChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: selected ? AppColors.ink : AppColors.surface,
-      borderRadius: BorderRadius.circular(999),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: selected ? Colors.white : AppColors.textSecondary,
-            ),
           ),
-        ),
+        ],
       ),
     );
   }
-}
-
-class _AddMachineDashedCard extends StatelessWidget {
-  const _AddMachineDashedCard({required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: onTap,
-        child: DottedBorderBox(
-          child: Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: AppColors.okTint,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Center(
-                  child: Icon(Icons.add_rounded, size: 22, color: AppColors.ok),
-                ),
-              ),
-              const SizedBox(width: 14),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Kalibrasi mesin baru',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.ink,
-                      ),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      'Rekam 120 detik kondisi sehat',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        color: AppColors.textMuted,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Dashed-border container (Flutter has no built-in dashed border), reused
-/// wherever the mockup shows a dashed "add" affordance.
-class DottedBorderBox extends StatelessWidget {
-  const DottedBorderBox({
-    super.key,
-    required this.child,
-    this.padding = const EdgeInsets.all(20),
-  });
-
-  final Widget child;
-  final EdgeInsets padding;
-
-  @override
-  Widget build(BuildContext context) {
-    return CustomPaint(
-      painter: _DashedBorderPainter(),
-      child: Padding(padding: padding, child: child),
-    );
-  }
-}
-
-class _DashedBorderPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rrect = RRect.fromRectAndRadius(
-      Offset.zero & size,
-      const Radius.circular(20),
-    );
-    final paint = Paint()
-      ..color = AppColors.dashedBorder
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
-    const dashWidth = 6.0;
-    const gapWidth = 5.0;
-    final path = Path()..addRRect(rrect);
-    for (final metric in path.computeMetrics()) {
-      var distance = 0.0;
-      while (distance < metric.length) {
-        final next = distance + dashWidth;
-        canvas.drawPath(
-          metric.extractPath(distance, next.clamp(0, metric.length)),
-          paint,
-        );
-        distance = next + gapWidth;
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
