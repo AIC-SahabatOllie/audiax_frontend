@@ -63,8 +63,6 @@ class _MachinesScreenState extends State<MachinesScreen> {
     });
   }
 
-  // ---------------------------------------------------------------- navigation
-
   void _openCalibration({Machine? existingMachine}) {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -189,8 +187,6 @@ class _MachinesScreenState extends State<MachinesScreen> {
       ),
     );
   }
-
-  // -------------------------------------------------------------------- build
 
   @override
   Widget build(BuildContext context) {

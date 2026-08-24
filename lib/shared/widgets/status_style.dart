@@ -22,7 +22,6 @@ static const StatusStyle unknown = StatusStyle(
     chip: AppColors.neutralChip,
   );
 
-  /// [status] presentation, or [unknown] when [inspected] is false.
   static StatusStyle forMachine(MachineStatus status, {required bool inspected}) =>
       inspected ? StatusStyle.of(status) : unknown;
 
