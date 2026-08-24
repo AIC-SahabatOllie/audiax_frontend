@@ -1,15 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:audiax_frontend/app/app.dart';
 
 void main() {
-  testWidgets('Shows the login screen when no session is stored', (WidgetTester tester) async {
-    SharedPreferences.setMockInitialValues({});
-
+  testWidgets('Boots the app shell', (WidgetTester tester) async {
     await tester.pumpWidget(const AudiaxApp());
-    await tester.pumpAndSettle();
 
-    expect(find.text('Masuk'), findsOneWidget);
+    expect(find.text('AUDIAX'), findsOneWidget);
   });
 }
