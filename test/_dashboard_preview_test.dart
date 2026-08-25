@@ -14,6 +14,7 @@ import 'package:audiax_frontend/shared/models/baseline.dart' as models;
 import 'package:audiax_frontend/shared/models/inspection.dart';
 import 'package:audiax_frontend/shared/models/machine.dart';
 import 'package:audiax_frontend/shared/models/user.dart';
+import 'package:audiax_frontend/shared/services/advisory_api.dart';
 import 'package:audiax_frontend/shared/services/baselines_api.dart';
 import 'package:audiax_frontend/shared/services/inspections_api.dart';
 import 'package:audiax_frontend/shared/services/machine_repository.dart';
@@ -25,6 +26,7 @@ class FakeRepo extends MachineRepository {
         machinesApi: MachinesApi(ApiClient(sessionStore: SessionStore())),
         baselinesApi: BaselinesApi(ApiClient(sessionStore: SessionStore())),
         inspectionsApi: InspectionsApi(ApiClient(sessionStore: SessionStore())),
+        advisoryApi: AdvisoryApi(ApiClient(sessionStore: SessionStore())),
       ) {
     isLoading = loading;
     error = err;

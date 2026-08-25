@@ -2,6 +2,8 @@ import 'package:flutter/material.dart' hide Baseline;
 
 import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_text_styles.dart';
+import '../../../../features/advisory/data/advisory_repository.dart';
+import '../../../../features/advisory/presentation/screens/advisory_chat_screen.dart';
 import '../../../../shared/models/baseline.dart';
 import '../../../../shared/models/inspection.dart';
 import '../../../../shared/models/machine_status.dart';
@@ -49,6 +51,20 @@ class ResultScreen extends StatelessWidget {
     Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
+  /// Hanya untuk inspeksi. Kalibrasi tidak menghasilkan `inspectionId`, dan
+  /// endpoint advisory memang tidak bisa dipanggil tanpanya.
+  void _openAdvisory(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AdvisoryChatScreen(
+          repository: AdvisoryRepository(repository.advisoryApi),
+          machineId: machineId,
+          inspection: _inspection!,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -80,7 +96,7 @@ class ResultScreen extends StatelessWidget {
                         else
                           IndicatorInsightCard(
                             dominantIndicator: _inspection!.dominantIndicator,
-                            reason: _inspection.reason,
+                            reason: _inspection!.reason,
                           ),
                       ],
                     ),
@@ -132,6 +148,14 @@ class ResultScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 20),
                   AppButton(label: 'Selesai', onPressed: () => _finish(context)),
+                  if (!_isCalibration) ...[
+                    const SizedBox(height: 10),
+                    AppButton(
+                      label: 'Tanya Teknisi Saku',
+                      variant: AppButtonVariant.secondary,
+                      onPressed: () => _openAdvisory(context),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   Text(
                     _isCalibration

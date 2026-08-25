@@ -4,6 +4,7 @@ import '../../core/errors/api_exception.dart';
 import '../models/baseline.dart';
 import '../models/inspection.dart';
 import '../models/machine.dart';
+import 'advisory_api.dart';
 import 'baselines_api.dart';
 import 'inspections_api.dart';
 import 'machines_api.dart';
@@ -20,20 +21,25 @@ class MachineRepository extends ChangeNotifier {
     required MachinesApi machinesApi,
     required BaselinesApi baselinesApi,
     required InspectionsApi inspectionsApi,
+    required AdvisoryApi advisoryApi,
   }) : _machinesApi = machinesApi,
        _baselinesApi = baselinesApi,
-       _inspectionsApi = inspectionsApi;
+       _inspectionsApi = inspectionsApi,
+       _advisoryApi = advisoryApi;
 
   final MachinesApi _machinesApi;
   final BaselinesApi _baselinesApi;
   final InspectionsApi _inspectionsApi;
+  final AdvisoryApi _advisoryApi;
 
-  /// Exposed so `RecordingScreen` can build the thin
-  /// `CalibrationRepository`/`InspectionRepository` wrappers without every
-  /// screen in the calibration/daily-check flow needing its own API-client
-  /// wiring threaded through `Navigator.push`.
+  /// Exposed so `RecordingScreen`/`ResultScreen` can build the thin
+  /// `CalibrationRepository`/`InspectionRepository`/`AdvisoryRepository`
+  /// wrappers without every screen in the calibration/daily-check/result
+  /// flow needing its own API-client wiring threaded through
+  /// `Navigator.push`.
   BaselinesApi get baselinesApi => _baselinesApi;
   InspectionsApi get inspectionsApi => _inspectionsApi;
+  AdvisoryApi get advisoryApi => _advisoryApi;
 
   List<Machine> _machines = [];
   final Map<String, List<Baseline>> _baselineHistory = {};

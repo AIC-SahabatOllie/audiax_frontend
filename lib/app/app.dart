@@ -7,6 +7,7 @@ import '../features/auth/data/auth_repository.dart';
 import '../features/auth/presentation/screens/landing_screen.dart';
 import '../features/machine_management/presentation/screens/machines_screen.dart';
 import '../shared/models/user.dart';
+import '../shared/services/advisory_api.dart';
 import '../shared/services/baselines_api.dart';
 import '../shared/services/inspections_api.dart';
 import '../shared/services/machine_repository.dart';
@@ -38,6 +39,7 @@ class _AudiaxAppState extends State<AudiaxApp> {
   late final MachinesApi _machinesApi = MachinesApi(_apiClient);
   late final BaselinesApi _baselinesApi = BaselinesApi(_apiClient);
   late final InspectionsApi _inspectionsApi = InspectionsApi(_apiClient);
+  late final AdvisoryApi _advisoryApi = AdvisoryApi(_apiClient);
 
   _BootPhase _phase = _BootPhase.checking;
   User? _user;
@@ -76,6 +78,7 @@ class _AudiaxAppState extends State<AudiaxApp> {
       machinesApi: _machinesApi,
       baselinesApi: _baselinesApi,
       inspectionsApi: _inspectionsApi,
+      advisoryApi: _advisoryApi,
     );
     repository.load();
     if (!mounted) return;
