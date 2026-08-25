@@ -47,4 +47,5 @@ app.*.map.json
 # Internal docs (not published to the repository)
 /docs/
 /.claude/
+*.md
 
