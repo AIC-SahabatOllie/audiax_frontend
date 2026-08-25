@@ -14,13 +14,28 @@ class AudioRecorderService {
   Future<void> start() async {
     final dir = await getTemporaryDirectory();
     final path = '${dir.path}/audiax_${DateTime.now().millisecondsSinceEpoch}.wav';
-    await _recorder.start(const RecordConfig(encoder: AudioEncoder.wav), path: path);
+    await _recorder.start(
+      const RecordConfig(
+        encoder: AudioEncoder.wav,
+        sampleRate: 16000,
+        numChannels: 1,
+      ),
+      path: path,
+    );
   }
 
   Future<File?> stop() async {
     final path = await _recorder.stop();
     if (path == null) return null;
     return File(path);
+  }
+
+  /// Live input level while recording — drives the spectrum bars, the input
+  /// quality card and the pre-upload quality gate.
+  Stream<Amplitude> amplitudeStream({
+    Duration interval = const Duration(milliseconds: 120),
+  }) {
+    return _recorder.onAmplitudeChanged(interval);
   }
 
   Future<void> cancel() => _recorder.cancel();

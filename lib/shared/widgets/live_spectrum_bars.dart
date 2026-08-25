@@ -1,79 +1,45 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 
-/// Animated bar spectrum used on the recording screen while audio is being
-/// captured. Purely decorative (no real-time FFT — there is no microphone
-/// wired up yet), seeded so the motion looks organic instead of uniform.
-class LiveSpectrumBars extends StatefulWidget {
+import '../services/audio_quality_controller.dart';
+
+/// Rolling history of the microphone input level shown while recording — one
+/// bar per sample in [AudioQualityController.levels], newest on the right.
+class LiveSpectrumBars extends StatelessWidget {
   const LiveSpectrumBars({
     super.key,
     required this.color,
-    this.barCount = 38,
+    required this.controller,
     this.height = 60,
   });
 
   final Color color;
-  final int barCount;
+  final AudioQualityController controller;
   final double height;
-
-  @override
-  State<LiveSpectrumBars> createState() => _LiveSpectrumBarsState();
-}
-
-class _LiveSpectrumBarsState extends State<LiveSpectrumBars>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-  late final List<_BarPhase> _phases;
-
-  @override
-  void initState() {
-    super.initState();
-    final random = math.Random(7);
-    _phases = List.generate(widget.barCount, (i) {
-      return _BarPhase(
-        speed: 0.6 + random.nextDouble() * 1.1,
-        phase: random.nextDouble() * math.pi * 2,
-        base: 0.28 + random.nextDouble() * 0.18,
-        amplitude: 0.28 + random.nextDouble() * 0.34,
-      );
-    });
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 60),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: widget.height,
-      child: AnimatedBuilder(
-        animation: _controller,
+      height: height,
+      child: ListenableBuilder(
+        listenable: controller,
         builder: (context, child) {
-          final t = _controller.lastElapsedDuration?.inMilliseconds ?? 0;
-          final seconds = t / 1000;
+          final levels = controller.levels;
           return Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              for (var i = 0; i < _phases.length; i++)
+              for (var i = 0; i < levels.length; i++)
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 1.2),
-                    child: FractionallySizedBox(
-                      alignment: Alignment.bottomCenter,
-                      heightFactor: _phases[i].heightFactorAt(seconds),
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: widget.color,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 120),
+                      curve: Curves.easeOut,
+                      // Floor of 3px so an idle mic still reads as a baseline
+                      // instead of an empty strip.
+                      height: (levels[i] * height).clamp(3.0, height),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.35 + levels[i] * 0.65),
+                        borderRadius: BorderRadius.circular(2),
                       ),
                     ),
                   ),
@@ -83,24 +49,5 @@ class _LiveSpectrumBarsState extends State<LiveSpectrumBars>
         },
       ),
     );
-  }
-}
-
-class _BarPhase {
-  const _BarPhase({
-    required this.speed,
-    required this.phase,
-    required this.base,
-    required this.amplitude,
-  });
-
-  final double speed;
-  final double phase;
-  final double base;
-  final double amplitude;
-
-  double heightFactorAt(double seconds) {
-    final wave = (math.sin(seconds * speed + phase) + 1) / 2;
-    return (base + amplitude * wave).clamp(0.05, 1.0);
   }
 }

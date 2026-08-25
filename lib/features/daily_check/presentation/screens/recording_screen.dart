@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 
@@ -8,6 +9,7 @@ import '../../../../core/errors/api_exception.dart';
 import '../../../../shared/models/calibration_draft.dart';
 import '../../../../shared/models/machine.dart';
 import '../../../../shared/models/recording_mode.dart';
+import '../../../../shared/services/audio_quality_controller.dart';
 import '../../../../shared/services/audio_recorder_service.dart';
 import '../../../../shared/services/machine_repository.dart';
 import '../../../../shared/widgets/app_button.dart';
@@ -18,7 +20,9 @@ import '../../../calibration/data/calibration_repository.dart';
 import '../../../result_card/presentation/screens/result_screen.dart';
 import '../../data/inspection_repository.dart';
 
-enum _Phase { preparing, permissionDenied, recording, uploading, error }
+enum _Phase { preparing, permissionDenied, recording, qualityWarning, uploading, error }
+
+enum _QualityIssue { clipping, lowSignal }
 
 /// Rekam 120 detik (kalibrasi) atau 10 detik (pemeriksaan harian), lalu
 /// unggah ke `POST /machines/:id/baselines` atau `.../inspections`
@@ -48,11 +52,14 @@ class RecordingScreen extends StatefulWidget {
 class _RecordingScreenState extends State<RecordingScreen> {
   late final Duration _total = widget.mode.duration;
   final AudioRecorderService _audio = AudioRecorderService();
+  final AudioQualityController _quality = AudioQualityController();
   DateTime? _startedAt;
   Duration _elapsed = Duration.zero;
   Timer? _timer;
   _Phase _phase = _Phase.preparing;
   String? _errorMessage;
+  File? _pendingFile;
+  _QualityIssue? _qualityIssue;
 
   bool get _isCalibrate => widget.mode == RecordingMode.calibrate;
 
@@ -66,6 +73,8 @@ class _RecordingScreenState extends State<RecordingScreen> {
     setState(() {
       _phase = _Phase.preparing;
       _errorMessage = null;
+      _pendingFile = null;
+      _qualityIssue = null;
     });
     final granted = await _audio.hasPermission();
     if (!mounted) return;
@@ -75,6 +84,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
     }
     await _audio.start();
     if (!mounted) return;
+    _quality.start(_audio.amplitudeStream());
     _startedAt = DateTime.now();
     setState(() {
       _phase = _Phase.recording;
@@ -86,6 +96,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
   void _tick() {
     final elapsed = DateTime.now().difference(_startedAt!);
     if (elapsed >= _total) {
+      setState(() => _elapsed = _total);
       _finishRecording();
       return;
     }
@@ -94,12 +105,39 @@ class _RecordingScreenState extends State<RecordingScreen> {
 
   Future<void> _finishRecording() async {
     _timer?.cancel();
+    await _quality.stop();
+    final file = await _audio.stop();
+    if (!mounted) return;
+    if (file == null) {
+      setState(() {
+        _phase = _Phase.error;
+        _errorMessage = 'Rekaman gagal disimpan.';
+      });
+      return;
+    }
+    final issue = _detectQualityIssue();
+    if (issue != null) {
+      setState(() {
+        _phase = _Phase.qualityWarning;
+        _pendingFile = file;
+        _qualityIssue = issue;
+      });
+      return;
+    }
+    await _proceedToUpload(file);
+  }
+
+  _QualityIssue? _detectQualityIssue() {
+    if (_quality.clippedRatio > AudioQualityController.clippingTolerance) {
+      return _QualityIssue.clipping;
+    }
+    if (_quality.hasLowSignal) return _QualityIssue.lowSignal;
+    return null;
+  }
+
+  Future<void> _proceedToUpload(File file) async {
     setState(() => _phase = _Phase.uploading);
     try {
-      final file = await _audio.stop();
-      if (file == null) {
-        throw const ApiException(statusCode: 0, error: 'Rekaman gagal disimpan.');
-      }
       if (_isCalibrate) {
         final draft = widget.draft!;
         final repo = CalibrationRepository(widget.repository.baselinesApi);
@@ -142,6 +180,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
 
   void _cancel() {
     _timer?.cancel();
+    _quality.stop();
     if (_phase == _Phase.recording) {
       _audio.cancel();
     }
@@ -151,6 +190,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _quality.dispose();
     super.dispose();
   }
 
@@ -223,6 +263,24 @@ class _RecordingScreenState extends State<RecordingScreen> {
           text: _isCalibrate ? 'Mengunggah baseline…' : 'Menganalisis kondisi mesin…',
           showSpinner: true,
         );
+      case _Phase.qualityWarning:
+        final file = _pendingFile!;
+        return _CenteredMessage(
+          text: _qualityIssue == _QualityIssue.clipping
+              ? 'Sinyal terlalu banyak clipping — coba jauhkan mikrofon dari sumber suara.'
+              : 'Level sinyal terlalu rendah — dekatkan mikrofon ke blower.',
+          action: Column(
+            children: [
+              AppButton(label: 'Ulangi Rekaman', onPressed: _begin),
+              const SizedBox(height: 10),
+              AppButton(
+                label: 'Lanjutkan Saja',
+                variant: AppButtonVariant.ghost,
+                onPressed: () => _proceedToUpload(file),
+              ),
+            ],
+          ),
+        );
       case _Phase.error:
         return _CenteredMessage(
           text: _errorMessage ?? 'Terjadi kesalahan.',
@@ -254,9 +312,9 @@ class _RecordingScreenState extends State<RecordingScreen> {
               style: const TextStyle(fontSize: 13, height: 1.6, color: Color(0xFF9AA4B2)),
             ),
             const SizedBox(height: 22),
-            const LiveSpectrumBars(color: AppColors.brandAccent),
+            LiveSpectrumBars(color: AppColors.brandAccent, controller: _quality),
             const SizedBox(height: 22),
-            const InputQualityCard(),
+            InputQualityCard(controller: _quality),
           ],
         );
     }
