@@ -51,7 +51,10 @@ class ApiClient {
     String path, {
     required String fieldName,
     required File file,
-  }) {
+  }) async {
+    if (!file.existsSync() || await file.length() == 0) {
+      throw const ApiException(statusCode: 400, error: 'Berkas audio tidak ditemukan atau kosong.');
+    }
     return _send(() async {
       final request = http.MultipartRequest('POST', _uri(path));
       final token = sessionStore.token;
@@ -59,22 +62,43 @@ class ApiClient {
       request.files.add(await http.MultipartFile.fromPath(fieldName, file.path));
       final streamed = await _http.send(request);
       return http.Response.fromStream(streamed);
-    }, timeout: const Duration(seconds: 60));
+    }, timeout: const Duration(seconds: 240));
   }
 
   Future<dynamic> _send(
     Future<http.Response> Function() call, {
-    Duration timeout = const Duration(seconds: 20),
+    Duration timeout = const Duration(seconds: 30),
+    int retries = 1,
   }) async {
-    http.Response response;
-    try {
-      response = await call().timeout(timeout);
-    } on TimeoutException {
-      throw ApiException.network('timeout');
-    } on SocketException catch (e) {
-      throw ApiException.network(e.message);
-    } on http.ClientException catch (e) {
-      throw ApiException.network(e.message);
+    http.Response? response;
+    Object? lastError;
+
+    for (var attempt = 0; attempt <= retries; attempt++) {
+      try {
+        response = await call().timeout(timeout);
+        break;
+      } on TimeoutException {
+        throw ApiException.network('timeout');
+      } on SocketException catch (e) {
+        lastError = e;
+        if (attempt < retries) {
+          await Future.delayed(const Duration(milliseconds: 500));
+          continue;
+        }
+      } on http.ClientException catch (e) {
+        lastError = e;
+        if (attempt < retries) {
+          await Future.delayed(const Duration(milliseconds: 500));
+          continue;
+        }
+      }
+    }
+
+    if (response == null) {
+      final message = lastError is SocketException
+          ? lastError.message
+          : (lastError is http.ClientException ? lastError.message : 'network error');
+      throw ApiException.network(message);
     }
 
     if (response.statusCode == 204) {
