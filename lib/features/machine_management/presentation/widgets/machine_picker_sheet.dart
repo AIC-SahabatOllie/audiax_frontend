@@ -69,7 +69,7 @@ class _MachinePickerSheet extends StatelessWidget {
                 shrinkWrap: true,
                 padding: const EdgeInsets.fromLTRB(14, 14, 14, 18),
                 itemCount: machines.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 8),
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
                 itemBuilder: (context, index) => _PickerRow(
                   machine: machines[index],
                   onTap: () => Navigator.of(context).pop(machines[index]),
