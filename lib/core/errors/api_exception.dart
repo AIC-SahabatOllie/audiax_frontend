@@ -38,6 +38,9 @@ class ApiException implements Exception {
   String get displayMessage {
     switch (statusCode) {
       case 0:
+        if (error == 'timeout') {
+          return 'Waktu koneksi habis. Proses kalibrasi/inspeksi membutuhkan waktu lebih lama. Silakan coba lagi.';
+        }
         return 'Tidak dapat terhubung ke server. Periksa koneksi Anda.';
       case 400:
         return error;
